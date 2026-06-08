@@ -266,7 +266,7 @@ function getFileIconByFileName(fileName) {
 
 <template>
   <div class="upload-file">
-    <template v-if="uploadConfig.url">
+    <template v-if="uploadConfig.uploadUrl">
       <div class="upload-file__template" v-if="templateFiles.length">
         <div>为了保证资料上传顺利，请先下载模板，并按照规范示例上传资料</div>
 
