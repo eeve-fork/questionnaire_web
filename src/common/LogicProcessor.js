@@ -129,7 +129,14 @@ export default class LogicProcessor {
           // 设置目标题目状态
           if (['normal', 'disabled', 'readonly', 'hidden'].includes(targetRule)) {
             targetQuestionList.forEach((targetQuestion) => {
+              // 记录变更前的状态
+              const prevStatus = targetQuestion.props.status;
               setTargetStatus(targetQuestion, targetRule);
+
+              // 当目标题目从隐藏变为可见时，重新评估其下游依赖的逻辑
+              if (prevStatus === 'hidden' && targetRule !== 'hidden') {
+                this.cascadeReevaluateDownstream(targetQuestion);
+              }
             });
           }
 
@@ -141,7 +148,15 @@ export default class LogicProcessor {
           }
         } else {
           targetQuestionList.forEach((targetQuestion) => {
-            setTargetStatus(targetQuestion, targetQuestionOldStatusMap.get(targetQuestion.key));
+            // 记录变更前的状态
+            const prevStatus = targetQuestion.props.status;
+            const revertStatus = targetQuestionOldStatusMap.get(targetQuestion.key);
+            setTargetStatus(targetQuestion, revertStatus);
+
+            // 当目标题目状态变为隐藏时，级联隐藏其下游依赖的题目
+            if (revertStatus === 'hidden' && prevStatus !== 'hidden') {
+              this.cascadeHideDownstream(targetQuestion);
+            }
           });
         }
       };
@@ -203,6 +218,63 @@ export default class LogicProcessor {
     this.option.subscribe.on(eventName, (newValue) => {
       handleLogicFn(newValue);
     });
+  }
+
+  /**
+   * 级联隐藏下游依赖的题目
+   * 当某个题目被隐藏时，找到以该题目为源题目的所有逻辑，将其目标题目也隐藏
+   */
+  cascadeHideDownstream(question) {
+    const logicList = this.questionnaireData.logicList || [];
+
+    // 找到以该题目为源题目的所有逻辑
+    const downstreamLogics = logicList.filter((logic) => logic.sourceKey === question.key);
+
+    downstreamLogics.forEach((logic) => {
+      const targetQuestionList = this.questionnaireData.questionList.filter((item) => {
+        return logic.targetKeyList.includes(item.key);
+      });
+
+      targetQuestionList.forEach((targetQuestion) => {
+        // 避免循环引用
+        if (targetQuestion.key === question.key) {
+          return;
+        }
+
+        // 如果已经是隐藏状态，不需要重复处理
+        if (targetQuestion.props.status === 'hidden') {
+          return;
+        }
+
+        targetQuestion.props.status = 'hidden';
+
+        // 继续级联隐藏
+        this.cascadeHideDownstream(targetQuestion);
+      });
+    });
+  }
+
+  /**
+   * 级联重新评估下游依赖的逻辑
+   * 当某个题目从隐藏变为可见时，以其当前值重新触发下游逻辑评估
+   */
+  cascadeReevaluateDownstream(question) {
+    if (!this.option.subscribe) {
+      return;
+    }
+
+    const logicList = this.questionnaireData.logicList || [];
+
+    // 检查是否有以该题目为源题目的下游逻辑
+    const hasDownstream = logicList.some((logic) => logic.sourceKey === question.key);
+
+    if (!hasDownstream) {
+      return;
+    }
+
+    // 以该题目的当前值重新触发onChange事件，让所有下游逻辑重新评估
+    const eventName = `${question.key}_onChange`;
+    this.option.subscribe.emit(eventName, question.props.defaultValue);
   }
 
   // 执行
